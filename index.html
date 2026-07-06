@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -74,7 +75,7 @@
   <section id="start">
     <div class="card">
       <h1>IT Lead — Technical Assessment</h1>
-      <p class="sub">You'd be inheriting a 20-year-old European specialty e-commerce platform (~90,000 SKUs,
+      <p class="sub">You'd be inheriting a 20-year-old European specialty e-commerce platform (~70,000 SKUs,
       multilingual) whose founder built everything himself and is now retiring. The stack: two Google Cloud
       servers — an <strong>Nginx + custom-PHP</strong> front-end and a <strong>PHP + MariaDB</strong> back-end —
       behind <strong>Cloudflare</strong> (CDN, WAF, DDoS, DNS), with ~80% of daily operations running on cron jobs.</p>
@@ -90,7 +91,7 @@
         <li>Part 1 — a few quick multiple-choice / code questions. Parts 2 &amp; 3 — written scenarios and questions about how you work.</li>
         <li>A 45-minute timer starts when you begin and auto-submits at zero.</li>
         <li>Be concrete: name tools, steps, and real examples. Depth beats length.</li>
-        <li>Don't refresh — your progress is held only in this browser until you submit.</li>
+        <li>Your progress auto-saves in this browser — if you reload or briefly lose internet, you'll pick up where you left off (same device &amp; browser). The timer keeps counting down.</li>
       </ul>
       <div class="card" style="background:var(--panel2)">
         <label class="note">Your full name</label>
@@ -210,11 +211,18 @@ const QUESTIONS = [
 const answers = {};
 let timeLeft = 45*60;
 let timerInt = null;
+let deadline = null;     // absolute end time (ms) — survives reloads
+let active = false;      // a test is in progress (unsaved)
+const LS_KEY = 'itlead_inprogress_v1';
 
-function startTest(){
-  const name = document.getElementById('cand').value.trim();
-  if(!name){ alert("Please enter your name to begin."); return; }
-  window.__cand = name;
+/* --- autosave so a reload / brief outage doesn't lose progress --- */
+function persist(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify({name:window.__cand, answers:answers, deadline:deadline})); }catch(e){}
+}
+function clearSaved(){ try{ localStorage.removeItem(LS_KEY); }catch(e){} }
+
+function beginSession(){
+  active = true;
   document.getElementById('start').classList.add('hide');
   document.getElementById('test').classList.remove('hide');
   document.getElementById('timer').classList.remove('hide');
@@ -222,6 +230,32 @@ function startTest(){
   startTimer();
   window.scrollTo(0,0);
 }
+
+function startTest(){
+  const name = document.getElementById('cand').value.trim();
+  if(!name){ alert("Please enter your name to begin."); return; }
+  window.__cand = name;
+  deadline = Date.now() + 45*60*1000;   // 45 minutes from now
+  persist();
+  beginSession();
+}
+
+/* On page load, silently resume an unfinished attempt if one exists. */
+function resumeIfAny(){
+  let saved=null;
+  try{ saved=JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){}
+  if(!saved || !saved.deadline) return;
+  window.__cand = saved.name || '';
+  Object.assign(answers, saved.answers||{});
+  deadline = saved.deadline;
+  beginSession();   // startTimer() handles the case where time already ran out
+}
+window.addEventListener('load', resumeIfAny);
+
+/* Warn on accidental refresh/close while a test is running. */
+window.addEventListener('beforeunload', function(e){
+  if(active){ e.preventDefault(); e.returnValue=''; }
+});
 
 function renderQuestions(){
   let html="", last="", n=0;
@@ -252,8 +286,8 @@ function renderQuestions(){
 }
 function pick(id,i){ answers[id]=i;
   document.querySelectorAll(`#card-${id} .opt`).forEach((el,idx)=>el.classList.toggle('sel',idx===i));
-  updateProgress(); }
-function saveOpen(id){ answers[id]=document.getElementById('open-'+id).value; updateProgress(); }
+  updateProgress(); persist(); }
+function saveOpen(id){ answers[id]=document.getElementById('open-'+id).value; updateProgress(); persist(); }
 function updateProgress(){
   const done=QUESTIONS.filter(q=>answers[q.id]!==undefined && answers[q.id]!=='').length;
   document.getElementById('progbar').style.width=(done/QUESTIONS.length*100)+'%';
@@ -261,12 +295,15 @@ function updateProgress(){
 }
 function startTimer(){
   const el=document.getElementById('timer');
-  timerInt=setInterval(()=>{
-    timeLeft--;
-    el.textContent=String(Math.floor(timeLeft/60)).padStart(2,'0')+':'+String(timeLeft%60).padStart(2,'0');
-    if(timeLeft<=300) el.classList.add('low');
-    if(timeLeft<=0){ clearInterval(timerInt); submitTest(true); }
-  },1000);
+  const tick=()=>{
+    const rem=Math.round((deadline-Date.now())/1000);   // recomputed from absolute deadline
+    timeLeft=rem;
+    if(rem<=0){ clearInterval(timerInt); el.textContent='00:00'; submitTest(true); return; }
+    el.textContent=String(Math.floor(rem/60)).padStart(2,'0')+':'+String(rem%60).padStart(2,'0');
+    if(rem<=300) el.classList.add('low');
+  };
+  tick();
+  timerInt=setInterval(tick,1000);
 }
 
 /* ===== SUBMIT (email raw responses; NO scoring here) ===== */
@@ -276,6 +313,8 @@ function submitTest(auto=false){
     if(!confirm(`Submit now? You've answered ${done} of ${QUESTIONS.length}. This can't be undone.`)) return;
   }
   clearInterval(timerInt);
+  active=false;        // stop the "leave page?" warning
+  clearSaved();        // wipe the autosave now that we're submitting
   const name=window.__cand||'—';
   // machine-readable payload for the grader
   const payload=JSON.stringify({name:name, ts:new Date().toISOString(), answers:answers});
