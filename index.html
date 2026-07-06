@@ -95,9 +95,13 @@
       </ul>
       <div class="card" style="background:var(--panel2)">
         <label class="note">Your full name</label>
-        <input id="cand" type="text" placeholder="e.g. Jane Doe" style="margin:8px 0 4px">
+        <input id="cand" type="text" placeholder="e.g. Jane Doe" style="margin:8px 0 12px">
+        <label class="note">Access passkey <span style="color:var(--muted)">(given to you just before the test)</span></label>
+        <input id="passkey" type="password" placeholder="Enter your passkey" style="margin:8px 0 4px" onkeydown="if(event.key==='Enter')startTest()">
+        <p id="gateErr" class="note" style="color:var(--bad);min-height:16px"></p>
+        <p class="note">⚠️ You get <strong>one attempt</strong>. The moment you press Start, your timed attempt begins and the questions load — you can't restart or preview. Only begin when you're ready.</p>
       </div>
-      <button class="btn" onclick="startTest()">Start assessment →</button>
+      <button class="btn" id="startBtn" onclick="startTest()">Start my one attempt →</button>
     </div>
   </section>
 
@@ -213,7 +217,16 @@ let timeLeft = 45*60;
 let timerInt = null;
 let deadline = null;     // absolute end time (ms) — survives reloads
 let active = false;      // a test is in progress (unsaved)
-const LS_KEY = 'itlead_inprogress_v1';
+const LS_KEY  = 'itlead_inprogress_v1';
+const LS_DONE = 'itlead_completed_v1';
+
+/* Passkey is stored ONLY as a salted SHA-256 hash — the plaintext is not in this file. */
+const PASSKEY_HASH = "7c307504e79469a62f3f52a1433db4f54289046fcdc29a1822ffee91e3ecddb4";
+const PASSKEY_SALT = "itlead::";
+async function sha256hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 
 /* --- autosave so a reload / brief outage doesn't lose progress --- */
 function persist(){
@@ -231,26 +244,49 @@ function beginSession(){
   window.scrollTo(0,0);
 }
 
-function startTest(){
+async function startTest(){
   const name = document.getElementById('cand').value.trim();
-  if(!name){ alert("Please enter your name to begin."); return; }
+  const pass = document.getElementById('passkey').value.trim();
+  const err  = document.getElementById('gateErr');
+  err.textContent = '';
+  if(!name){ err.textContent = 'Please enter your full name.'; return; }
+  if(!pass){ err.textContent = 'Please enter your access passkey.'; return; }
+  // already used on this browser?
+  try{ if(localStorage.getItem(LS_DONE)){ err.textContent = 'This assessment has already been completed on this device.'; return; } }catch(e){}
+  // validate passkey against the stored hash
+  let ok=false;
+  try{ ok = (await sha256hex(PASSKEY_SALT + pass)) === PASSKEY_HASH; }
+  catch(e){ err.textContent = 'This page must be opened over its secure (https) link to start.'; return; }
+  if(!ok){ err.textContent = 'Incorrect passkey. Please check with the person who invited you.'; return; }
+
   window.__cand = name;
   deadline = Date.now() + 45*60*1000;   // 45 minutes from now
   persist();
   beginSession();
 }
 
-/* On page load, silently resume an unfinished attempt if one exists. */
-function resumeIfAny(){
+/* Locked screen if this browser already finished an attempt. */
+function showLocked(){
+  document.getElementById('start').innerHTML =
+    `<div class="card"><h1>Assessment already completed</h1>
+     <p class="sub">Our records show this assessment was already submitted from this device. You only get one attempt.
+     If you believe this is a mistake, please contact the person who invited you.</p></div>`;
+}
+
+/* On page load: resume an unfinished attempt, else lock if already done, else show the gate. */
+function bootstrap(){
   let saved=null;
   try{ saved=JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){}
-  if(!saved || !saved.deadline) return;
-  window.__cand = saved.name || '';
-  Object.assign(answers, saved.answers||{});
-  deadline = saved.deadline;
-  beginSession();   // startTimer() handles the case where time already ran out
+  if(saved && saved.deadline){
+    window.__cand = saved.name || '';
+    Object.assign(answers, saved.answers||{});
+    deadline = saved.deadline;
+    beginSession();   // startTimer() handles the case where time already ran out
+    return;
+  }
+  try{ if(localStorage.getItem(LS_DONE)){ showLocked(); } }catch(e){}
 }
-window.addEventListener('load', resumeIfAny);
+window.addEventListener('load', bootstrap);
 
 /* Warn on accidental refresh/close while a test is running. */
 window.addEventListener('beforeunload', function(e){
@@ -315,6 +351,7 @@ function submitTest(auto=false){
   clearInterval(timerInt);
   active=false;        // stop the "leave page?" warning
   clearSaved();        // wipe the autosave now that we're submitting
+  try{ localStorage.setItem(LS_DONE, new Date().toISOString()); }catch(e){}  // lock this browser to one attempt
   const name=window.__cand||'—';
   // machine-readable payload for the grader
   const payload=JSON.stringify({name:name, ts:new Date().toISOString(), answers:answers});
