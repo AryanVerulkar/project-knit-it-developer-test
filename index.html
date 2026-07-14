@@ -33,6 +33,7 @@
   .pill.core{color:#82aaff;border-color:#2f3a4a}
   .pill.scen{color:#6ee7b7;border-color:#2f4a3a}
   .pill.ai{color:#f6ad55;border-color:#4a3a2f}
+  .pill.mig{color:#e5a3ff;border-color:#3f2f4a}
   .q{margin:0 0 14px;font-weight:600}
   .qmeta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
   pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;
@@ -63,7 +64,7 @@
 <header class="bar">
   <div class="wrap">
     <div class="brand"><span class="logo"></span> Project Knit · IT Lead Assessment</div>
-    <div id="timer" class="timer hide">45:00</div>
+    <div id="timer" class="timer hide">60:00</div>
   </div>
   <div class="prog"><div id="progbar"></div></div>
 </header>
@@ -83,12 +84,12 @@
       generic textbook answers score lower than specific, practical ones.</p>
       <div class="kpi">
         <div class="box"><div class="num">15</div><div class="note">questions</div></div>
-        <div class="box"><div class="num">45</div><div class="note">minutes</div></div>
-        <div class="box"><div class="num">3</div><div class="note">parts</div></div>
+        <div class="box"><div class="num">60</div><div class="note">minutes</div></div>
+        <div class="box"><div class="num">4</div><div class="note">parts</div></div>
       </div>
       <ul class="note">
-        <li>Part 1 — a few quick multiple-choice / code questions. Parts 2 &amp; 3 — written scenarios and questions about how you work.</li>
-        <li>A 45-minute timer starts when you begin and auto-submits at zero.</li>
+        <li>Part 1 — a few quick multiple-choice / code questions. Parts 2–4 — written answers: real-world scenarios, how you work with AI, and how you'd lead the migration and extract the founder's knowledge. The later parts carry the most weight.</li>
+        <li>A 60-minute timer starts when you begin and auto-submits at zero.</li>
         <li>Be concrete: name tools, steps, and real examples. Depth beats length.</li>
         <li>Your progress auto-saves in this browser — if you reload or briefly lose internet, you'll pick up where you left off (same device &amp; browser). The timer keeps counting down.</li>
       </ul>
@@ -129,7 +130,8 @@ const REVIEW_CONFIG = {
 const SECTIONS = {
   core:["Part 1 · Stack fundamentals","core"],
   scen:["Part 2 · Real-world scenarios","scen"],
-  ai:["Part 3 · How you work with AI","ai"]
+  ai:["Part 3 · How you work with AI","ai"],
+  mig:["Part 4 · Leading the migration & knowledge transfer","mig"]
 };
 const QUESTIONS = [
 /* --- Part 1: quick objective (MCQ + one coding) --- */
@@ -187,17 +189,11 @@ const QUESTIONS = [
 {id:8,sect:"scen",type:"open",
  q:"Customers intermittently get Cloudflare error pages — sometimes 521, sometimes 522 — while the site looks fine to you. What do those errors tell you, and how would you investigate and fix the root cause?"},
 
-{id:9,sect:"scen",type:"open",
- q:"A marketing push is expected to drive roughly 10x normal traffic to the current two-VM PHP/MariaDB setup for about 48 hours. Nothing can go down. How would you prepare the infrastructure? Be specific about trade-offs and what you'd do first."},
-
 {id:10,sect:"scen",type:"open",
  q:"About 80% of daily operations run as cron jobs, and you discover the loyalty-rewards cron was silently paused weeks ago after a rules change — nobody noticed until customers complained. As the incoming IT Lead, how would you have caught this sooner, and what would you put in place so no critical automation ever fails silently again?"},
 
 {id:11,sect:"scen",type:"open",
  q:"During handover you find config.php committed to the git repo, containing the production MariaDB password and the live Stripe secret key in plaintext — the founder stored secrets in code for 20 years. Walk me through the risks and your step-by-step remediation plan."},
-
-{id:12,sect:"scen",type:"open",
- q:"The business's single biggest asset is 20 years of organic search ranking. A future migration will change the URLs of all 70,000+ product pages. What is your plan to protect the SEO through that change, and what are the ways it could go wrong?"},
 
 /* --- Part 3: how you work with AI (experience) --- */
 {id:13,sect:"ai",type:"open",
@@ -207,12 +203,19 @@ const QUESTIONS = [
  q:"What part of your job do you no longer do yourself because you've handed it to AI? What changed in how you work — and how do you make sure the AI's output is actually correct before you rely on it?"},
 
 {id:15,sect:"ai",type:"open",
- q:"Give one concrete example of a repetitive or manual process you turned into an automation (a cron job, a script, or a workflow). What did it replace, who benefited, and what was the measurable impact?"}
+ q:"Give one concrete example of a repetitive or manual process you turned into an automation (a cron job, a script, or a workflow). What did it replace, who benefited, and what was the measurable impact?"},
+
+/* --- Part 4: the actual role — migration architecture & knowledge extraction (highest weight) --- */
+{id:16,sect:"mig",type:"open",
+ q:"Eventually this 20-year-old custom platform must move to Shopify Plus with zero revenue disruption. The catalogue lives in a heavily customised MariaDB schema: 70,000+ SKUs, descriptions in several languages, and many bespoke attributes the founder added over the years (fabric composition, thread counts, supplier codes, loyalty rules, and more). At a high level, how would you approach mapping this catalogue into Shopify's data model (products, variants, metafields)? What constraints, risks, and data-loss traps would you expect, and how would you cut over without downtime? (You don't need Shopify-specific syntax — we want to see how you reason through the problem.)"},
+
+{id:17,sect:"mig",type:"open",
+ q:"Most of this platform is undocumented and lives in the founder's head — and in practice the person who built a system is often busy, protective of it, or unable to explain it in technical terms. Describe your approach to reverse-engineering and documenting an undocumented system in that situation: how you'd extract what you need, validate that you've understood it correctly, and avoid breaking anything while you learn. A real example from your experience is welcome."}
 ];
 
 /* ===== STATE / RENDER ===== */
 const answers = {};
-let timeLeft = 45*60;
+let timeLeft = 60*60;
 let timerInt = null;
 let deadline = null;     // absolute end time (ms) — survives reloads
 let active = false;      // a test is in progress (unsaved)
@@ -222,6 +225,10 @@ const LS_DONE = 'itlead_completed_v1';
 /* Passkey is stored ONLY as a salted SHA-256 hash — the plaintext is not in this file. */
 const PASSKEY_HASH = "7c307504e79469a62f3f52a1433db4f54289046fcdc29a1822ffee91e3ecddb4";
 const PASSKEY_SALT = "itlead::";
+/* Reviewer reset secret (separate from the candidate passkey), stored as a hash too.
+   Usage: open the test URL with ?reset=<secret> to clear the one-attempt lock on this browser. */
+const RESET_HASH = "7fa69a4196a2c6359f3cb48c2cce84f78115847a1e8e76391dbb1c252702b552";
+const RESET_SALT = "reset::";
 async function sha256hex(str){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -259,7 +266,7 @@ async function startTest(){
   if(!ok){ err.textContent = 'Incorrect passkey. Please check with the person who invited you.'; return; }
 
   window.__cand = name;
-  deadline = Date.now() + 45*60*1000;   // 45 minutes from now
+  deadline = Date.now() + 60*60*1000;   // 60 minutes from now
   persist();
   beginSession();
 }
@@ -272,8 +279,23 @@ function showLocked(){
      If you believe this is a mistake, please contact the person who invited you.</p></div>`;
 }
 
-/* On page load: resume an unfinished attempt, else lock if already done, else show the gate. */
-function bootstrap(){
+/* On page load: handle a reviewer reset, else resume an unfinished attempt,
+   else lock if already done, else show the gate. */
+async function bootstrap(){
+  // ?reset=<secret> — clears the one-attempt lock on this browser (reviewer only)
+  const rp = new URLSearchParams(location.search).get('reset');
+  if(rp){
+    let ok=false;
+    try{ ok = (await sha256hex(RESET_SALT + rp)) === RESET_HASH; }catch(e){}
+    if(ok){
+      clearSaved();
+      try{ localStorage.removeItem(LS_DONE); }catch(e){}
+    }
+    // strip the param from the address bar either way, then continue to a fresh gate
+    history.replaceState(null,'',location.pathname);
+    if(ok){ return; }  // fall through to a clean start screen
+  }
+
   let saved=null;
   try{ saved=JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){}
   if(saved && saved.deadline){
